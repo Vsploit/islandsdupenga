@@ -1,130 +1,144 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-
---// Settings //--
+-- CONFIG
+local TOGGLE_KEY = Enum.KeyCode.RightControl
 local SPEED = 2
-local BOOST_SPEED = 5
-local SENSITIVITY = 0.2
-local SMOOTHNESS = 0.1 -- Lower is smoother (0.05 - 0.3)
+local SENSITIVITY = 0.005
 
---// State //--
-local enabled = false
-local moveInput = Vector3.new()
+-- INITIALIZE STATE
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 local rotX, rotY = 0, 0
-local targetCFrame = Camera.CFrame
+local keys = {W=0, S=0, A=0, D=0, Q=0, E=0}
+_G.FreecamEnabled = false
 
---// Input State //--
-local keys = {
-	W = false, A = false, S = false, D = false,
-	Q = false, E = false, LeftShift = false
-}
+-- CLEANUP
+if _G.FreecamConnection then _G.FreecamConnection:Disconnect() end
+if _G.FreecamUI then _G.FreecamUI:Destroy() end
 
---// Cleanup Previous Instances //--
--- This ensures if you run the script twice, it removes the old one first
-if _G.FreecamConnection then
-	_G.FreecamConnection:Disconnect()
-	print("Previous Freecam disconnected")
+-- CREATE DRAGGABLE INFO GUI
+local sg = Instance.new("ScreenGui")
+sg.Name = "FreecamStatusUI"
+sg.ResetOnSpawn = false
+sg.Parent = player:FindFirstChild("PlayerGui") or CoreGui
+_G.FreecamUI = sg
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 80)
+frame.Position = UDim2.new(0.05, 0, 0.4, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true 
+frame.Parent = sg
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0.4, 0)
+title.BackgroundTransparency = 1
+title.Text = "FREECAM STATUS"
+title.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 14
+title.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0.3, 0)
+statusLabel.Position = UDim2.new(0, 0, 0.35, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "DISABLED"
+statusLabel.TextColor3 = Color3.fromRGB(200, 50, 50)
+statusLabel.Font = Enum.Font.SourceSansBold
+statusLabel.TextSize = 22
+statusLabel.Parent = frame
+
+local hint = Instance.new("TextLabel")
+hint.Size = UDim2.new(1, 0, 0.2, 0)
+hint.Position = UDim2.new(0, 0, 0.75, 0)
+hint.BackgroundTransparency = 1
+hint.Text = "Press [RightCtrl] to Toggle"
+hint.TextColor3 = Color3.new(0.6, 0.6, 0.6)
+hint.Font = Enum.Font.SourceSans
+hint.TextSize = 12
+hint.Parent = frame
+
+-- CHARACTER FREEZE
+local function setCharacterFrozen(frozen)
+    local character = player.Character
+    if character then
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if root then root.Anchored = frozen end
+    end
 end
 
---// Logic //--
-local function getMoveVector()
-	local vec = Vector3.new()
-	if keys.W then vec = vec + Vector3.new(0, 0, -1) end
-	if keys.S then vec = vec + Vector3.new(0, 0, 1) end
-	if keys.A then vec = vec + Vector3.new(-1, 0, 0) end
-	if keys.D then vec = vec + Vector3.new(1, 0, 0) end
-	if keys.Q then vec = vec + Vector3.new(0, -1, 0) end -- Down
-	if keys.E then vec = vec + Vector3.new(0, 1, 0) end  -- Up
-	return vec
+-- TOGGLE LOGIC
+local function toggle()
+    _G.FreecamEnabled = not _G.FreecamEnabled
+    if _G.FreecamEnabled then
+        camera.CameraType = Enum.CameraType.Scriptable
+        UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        setCharacterFrozen(true)
+        
+        statusLabel.Text = "ENABLED"
+        statusLabel.TextColor3 = Color3.fromRGB(50, 200, 50)
+        
+        local rx, ry, rz = camera.CFrame:ToOrientation()
+        rotX, rotY = rx, ry
+    else
+        camera.CameraType = Enum.CameraType.Custom
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        setCharacterFrozen(false)
+        
+        statusLabel.Text = "DISABLED"
+        statusLabel.TextColor3 = Color3.fromRGB(200, 50, 50)
+    end
 end
 
-local function toggleFreecam()
-	enabled = not enabled
-	
-	if enabled then
-		Camera.CameraType = Enum.CameraType.Scriptable
-		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		targetCFrame = Camera.CFrame -- Reset target to current pos
-		
-		-- Capture current rotation to prevent snapping
-		local rx, ry, rz = Camera.CFrame:ToOrientation()
-		rotX = rx
-		rotY = ry
-		print("Freecam ON")
-	else
-		Camera.CameraType = Enum.CameraType.Custom
-		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		print("Freecam OFF")
-	end
-end
-
---// Input Handling //--
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	
-	-- Toggle Key: Left Ctrl + P
-	if input.KeyCode == Enum.KeyCode.P and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-		toggleFreecam()
-	end
-	
-	if input.KeyCode == Enum.KeyCode.W then keys.W = true end
-	if input.KeyCode == Enum.KeyCode.A then keys.A = true end
-	if input.KeyCode == Enum.KeyCode.S then keys.S = true end
-	if input.KeyCode == Enum.KeyCode.D then keys.D = true end
-	if input.KeyCode == Enum.KeyCode.Q then keys.Q = true end
-	if input.KeyCode == Enum.KeyCode.E then keys.E = true end
-	if input.KeyCode == Enum.KeyCode.LeftShift then keys.LeftShift = true end
+-- INPUTS
+UserInputService.InputBegan:Connect(function(io, p)
+    if io.KeyCode == TOGGLE_KEY then toggle() end
+    if not _G.FreecamEnabled or p then return end
+    
+    if io.KeyCode == Enum.KeyCode.W then keys.W = 1 end
+    if io.KeyCode == Enum.KeyCode.S then keys.S = 1 end
+    if io.KeyCode == Enum.KeyCode.A then keys.A = 1 end
+    if io.KeyCode == Enum.KeyCode.D then keys.D = 1 end
+    if io.KeyCode == Enum.KeyCode.E then keys.E = 1 end
+    if io.KeyCode == Enum.KeyCode.Q then keys.Q = 1 end
 end)
 
-UserInputService.InputEnded:Connect(function(input)
-	if input.KeyCode == Enum.KeyCode.W then keys.W = false end
-	if input.KeyCode == Enum.KeyCode.A then keys.A = false end
-	if input.KeyCode == Enum.KeyCode.S then keys.S = false end
-	if input.KeyCode == Enum.KeyCode.D then keys.D = false end
-	if input.KeyCode == Enum.KeyCode.Q then keys.Q = false end
-	if input.KeyCode == Enum.KeyCode.E then keys.E = false end
-	if input.KeyCode == Enum.KeyCode.LeftShift then keys.LeftShift = false end
+UserInputService.InputEnded:Connect(function(io)
+    if io.KeyCode == Enum.KeyCode.W then keys.W = 0 end
+    if io.KeyCode == Enum.KeyCode.S then keys.S = 0 end
+    if io.KeyCode == Enum.KeyCode.A then keys.A = 0 end
+    if io.KeyCode == Enum.KeyCode.D then keys.D = 0 end
+    if io.KeyCode == Enum.KeyCode.E then keys.E = 0 end
+    if io.KeyCode == Enum.KeyCode.Q then keys.Q = 0 end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-	if enabled and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local delta = input.Delta
-		rotY = rotY - delta.X * math.rad(SENSITIVITY)
-		rotX = rotX - delta.Y * math.rad(SENSITIVITY)
-		
-		-- Clamp vertical look
-		rotX = math.clamp(rotX, math.rad(-89), math.rad(89))
-	end
+-- LOOP
+_G.FreecamConnection = RunService.RenderStepped:Connect(function(dt)
+    if not _G.FreecamEnabled then return end
+    
+    camera.CameraType = Enum.CameraType.Scriptable
+    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+
+    -- Mouse rotation (No Right-Click required)
+    local delta = UserInputService:GetMouseDelta()
+    rotY = rotY - (delta.X * SENSITIVITY)
+    rotX = math.clamp(rotX - (delta.Y * SENSITIVITY), -1.5, 1.5)
+    
+    local rotation = CFrame.fromEulerAnglesYXZ(rotX, rotY, 0)
+    local moveDir = Vector3.new(keys.D - keys.A, keys.E - keys.Q, keys.S - keys.W)
+    local accel = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 4 or 1
+    
+    camera.CFrame = (CFrame.new(camera.CFrame.Position) * rotation) * CFrame.new(moveDir * SPEED * accel)
 end)
 
---// Render Loop //--
--- We use BindToRenderStep with high priority to ensure camera updates last
-local connection = RunService.RenderStepped:Connect(function(dt)
-	if not enabled then return end
-	
-	local currentSpeed = keys.LeftShift and BOOST_SPEED or SPEED
-	local moveVec = getMoveVector()
-	
-	-- Create rotation CFrame
-	local rotation = CFrame.fromOrientation(rotX, rotY, 0)
-	
-	-- Calculate target position relative to rotation
-	if moveVec.Magnitude > 0 then
-		moveVec = moveVec.Unit * currentSpeed
-	end
-	
-	-- Update target CFrame
-	targetCFrame = CFrame.new(targetCFrame.Position) * rotation * CFrame.new(moveVec)
-	
-	-- Apply to camera (with optional interpolation for smoothness)
-	-- For instant movement, just use: Camera.CFrame = targetCFrame
-	Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 0.5) 
-end)
-
--- Store connection globally so we can clean it up if script runs again
-_G.FreecamConnection = connection
+print("Freecam Loaded. Mouse locked. Use Right Control to toggle.")
